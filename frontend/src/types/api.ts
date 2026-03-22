@@ -81,12 +81,27 @@ export interface ThesisResult {
     signal: 'BULLISH' | 'NEUTRAL' | 'BEARISH';
     reason: string;
     rsi: number | null;
+    week_52_position?: 'NEAR_HIGH' | 'MID_RANGE' | 'NEAR_LOW';
   };
   sentiment: {
     signal: 'POSITIVE' | 'NEUTRAL' | 'NEGATIVE';
     reason: string;
     score: number;
+    headlines?: string[];
   };
+  analyst?: {
+    signal: 'BULLISH' | 'NEUTRAL' | 'BEARISH';
+    reason: string;
+    consensus: 'BUY' | 'HOLD' | 'SELL';
+    strong_buy?: number;
+    buy?: number;
+    hold?: number;
+    sell?: number;
+    strong_sell?: number;
+    total?: number;
+  };
+  key_risks?: string[];
+  key_catalysts?: string[];
   verdict: 'HOLD' | 'WATCH' | 'AVOID';
   confidence: 'HIGH' | 'MEDIUM' | 'LOW';
 }

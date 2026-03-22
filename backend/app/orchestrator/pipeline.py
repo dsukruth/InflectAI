@@ -158,6 +158,8 @@ async def run_query_pipeline(request: QueryRequest) -> dict[str, Any]:
             "source": source,
             "citation": citation,
             "confidence_level": conf,
+            "side": intent.get("side"),
+            "quantity": int(intent.get("quantity") or 0) or None,
         }
 
     if intent_type == "thesis":

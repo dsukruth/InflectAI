@@ -1,15 +1,12 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { useAuthStore } from "@/store/authStore";
 import { usePortfolioStore } from "@/store/portfolioStore";
-import { supabase } from "@/integrations/supabase/client";
 import { useStockQuotes } from "@/hooks/useStockQuotes";
-import { formatCurrency, formatPercent } from "@/utils/formatters";
+import { formatCurrency } from "@/utils/formatters";
 import ActivePositions from "@/components/portfolio/ActivePositions";
 import TradeHistory from "@/components/trading/TradeHistory";
-import type { Position, Trade } from "@/types/api";
+import { fetchPortfolio } from "@/api/trades";
 
 const AppPortfolio = () => {
-  const { user } = useAuthStore();
   const { positions, trades, buyingPower, setPositions, setTrades, setBuyingPower } = usePortfolioStore();
   const [isLoading, setIsLoading] = useState(true);
 
@@ -17,18 +14,18 @@ const AppPortfolio = () => {
   const { quotes } = useStockQuotes(positionTickers, 30_000);
 
   const fetchData = useCallback(async () => {
-    if (!user) return;
     setIsLoading(true);
-    const [posRes, tradeRes, profileRes] = await Promise.all([
-      supabase.from("positions").select("*").eq("user_id", user.id),
-      supabase.from("trades").select("*").eq("user_id", user.id).order("created_at", { ascending: false }).limit(50),
-      supabase.from("profiles").select("buying_power").eq("id", user.id).single(),
-    ]);
-    if (posRes.data) setPositions(posRes.data as unknown as Position[]);
-    if (tradeRes.data) setTrades(tradeRes.data as unknown as Trade[]);
-    if (profileRes.data) setBuyingPower(profileRes.data.buying_power);
-    setIsLoading(false);
-  }, [user, setPositions, setTrades, setBuyingPower]);
+    try {
+      const data = await fetchPortfolio();
+      setPositions(data.positions);
+      setTrades(data.trades);
+      setBuyingPower(data.buying_power);
+    } catch (e) {
+      console.error("Portfolio load error:", e);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [setPositions, setTrades, setBuyingPower]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 

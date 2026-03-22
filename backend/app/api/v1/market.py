@@ -1,233 +1,286 @@
 from fastapi import APIRouter, HTTPException
-import httpx
-import os
 from datetime import datetime
-import asyncio
+
+from app.services.snowflake_rag_service import get_snowflake_connection, snowflake_configured
 
 router = APIRouter()
 
-FINNHUB_KEY = os.getenv("FINNHUB_KEY_1", "")
-FINNHUB_BASE = "https://finnhub.io/api/v1"
 
-TICKER_LIST = [
-    "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL",
-    "META", "TSLA", "AVGO", "AMD", "INTC",
-    "JPM", "GS", "BAC", "V", "MA",
-    "WMT", "COST", "MCD", "NKE", "SBUX",
-    "JNJ", "UNH", "PFE", "ABBV", "MRK",
-    "XOM", "CVX", "CAT", "BA", "RTX",
-]
-
-
-def get_stock_quote(ticker: str) -> dict:
+def _get_quote_from_snowflake(ticker: str) -> dict:
+    conn = get_snowflake_connection()
     try:
-        url = f"{FINNHUB_BASE}/quote"
-        params = {
-            "symbol": ticker.upper(),
-            "token": FINNHUB_KEY
-        }
-        with httpx.Client(timeout=10) as client:
-            response = client.get(url, params=params)
-            data = response.json()
-
-        price = float(data.get("c", 0) or 0)
-        prev = float(data.get("pc", 0) or 0)
-        change = float(data.get("dp", 0) or 0)
-        high = float(data.get("h", 0) or 0)
-        low = float(data.get("l", 0) or 0)
-
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT CLOSE_PRICE, OPEN_PRICE, HIGH_PRICE, LOW_PRICE, VOLUME, TRADE_DATE
+            FROM PRICES
+            WHERE TICKER = %s
+            ORDER BY TRADE_DATE DESC
+            LIMIT 2
+            """,
+            (ticker.upper(),),
+        )
+        rows = cur.fetchall()
+        if not rows:
+            return {}
+        current = rows[0]
+        prev_close = rows[1][0] if len(rows) > 1 else current[0]
+        price = float(current[0])
+        change = round(price - float(prev_close), 2)
+        change_pct = round((change / float(prev_close)) * 100, 2) if prev_close else 0.0
         return {
             "ticker": ticker.upper(),
             "price": round(price, 2),
-            "change_percent": round(change, 2),
-            "change": round(change, 2),
-            "high": round(high, 2),
-            "low": round(low, 2),
-            "prev_close": round(prev, 2),
-            "volume": 0,
+            "open": round(float(current[1]), 2),
+            "high": round(float(current[2]), 2),
+            "low": round(float(current[3]), 2),
+            "volume": int(current[4]),
+            "trade_date": str(current[5]),
+            "change": change,
+            "change_percent": change_pct,
+            "prev_close": round(float(prev_close), 2),
             "direction": "up" if change >= 0 else "down",
             "timestamp": datetime.now().isoformat(),
-            "market_open": True,
         }
-    except Exception as e:
-        return _yfinance_fallback(ticker, str(e))
+    finally:
+        conn.close()
 
 
-def _yfinance_fallback(ticker: str, error: str) -> dict:
+def _get_stock_info_from_snowflake(ticker: str) -> dict:
+    conn = get_snowflake_connection()
     try:
-        import yfinance as yf
-        stock = yf.Ticker(ticker)
-        hist = stock.history(period="5d")
-        if hist is not None and not hist.empty:
-            price = float(hist['Close'].iloc[-1])
-            prev = float(hist['Close'].iloc[-2]) if len(hist) >= 2 else price
-            change = ((price - prev) / prev * 100) if prev else 0.0
-            return {
-                "ticker": ticker.upper(),
-                "price": round(price, 2),
-                "change_percent": round(change, 2),
-                "change": round(change, 2),
-                "volume": int(hist['Volume'].iloc[-1]),
-                "direction": "up" if change >= 0 else "down",
-                "timestamp": datetime.now().isoformat(),
-                "market_open": True,
-                "source": "yfinance_fallback"
-            }
-    except Exception:
-        pass
-    return {
-        "ticker": ticker.upper(),
-        "price": 0.0,
-        "change_percent": 0.0,
-        "change": 0.0,
-        "volume": 0,
-        "direction": "up",
-        "timestamp": datetime.now().isoformat(),
-        "error": error,
-    }
+        cur = conn.cursor()
+        # Get fundamentals
+        cur.execute(
+            """
+            SELECT TICKER, COMPANY_NAME, PE_RATIO, FORWARD_PE, EPS, REVENUE,
+                   GROSS_MARGIN, PROFIT_MARGIN, MARKET_CAP, BETA, ROE, DIV_YIELD,
+                   SECTOR, INDUSTRY, DESCRIPTION, HIGH_52W, LOW_52W, AVG_VOLUME,
+                   PRICE_TO_BOOK, DEBT_EQUITY, CURRENT_RATIO, REVENUE_GROWTH,
+                   EBITDA, CEO, EMPLOYEES, WEBSITE
+            FROM FUNDAMENTALS
+            WHERE TICKER = %s
+            """,
+            (ticker.upper(),),
+        )
+        row = cur.fetchone()
+        if not row:
+            return {}
+        cols = [c[0].lower() for c in cur.description]
+        data = dict(zip(cols, row))
+
+        # Get latest price
+        quote = _get_quote_from_snowflake(ticker)
+        price = quote.get("price", 0)
+        change_pct = quote.get("change_percent", 0)
+        change = quote.get("change", 0)
+        prev_close = quote.get("prev_close", price)
+
+        # Get latest recommendations
+        cur.execute(
+            """
+            SELECT STRONG_BUY, BUY, HOLD, SELL, STRONG_SELL
+            FROM RECOMMENDATIONS
+            WHERE TICKER = %s
+            ORDER BY PERIOD DESC
+            LIMIT 1
+            """,
+            (ticker.upper(),),
+        )
+        rec = cur.fetchone()
+
+        name = data.get("company_name") or ticker.upper()
+        market_cap = data.get("market_cap")
+        pe = data.get("pe_ratio")
+        high_52w = data.get("high_52w")
+        low_52w = data.get("low_52w")
+
+        parts = [f"{name} ({ticker.upper()}) is trading at ${price:.2f}"]
+        parts.append(f"{'up' if change >= 0 else 'down'} {abs(change_pct):.2f}% from yesterday's close of ${prev_close:.2f}")
+        if pe:
+            parts.append(f"P/E ratio is {pe:.1f}")
+        if market_cap:
+            parts.append(f"market cap is ${market_cap / 1e9:.1f}B")
+        if high_52w and low_52w:
+            parts.append(f"52-week range is ${low_52w:.2f} to ${high_52w:.2f}")
+
+        result = {
+            **quote,
+            "name": name,
+            "sector": data.get("sector"),
+            "industry": data.get("industry"),
+            "description": data.get("description"),
+            "pe_ratio": pe,
+            "forward_pe": data.get("forward_pe"),
+            "eps": data.get("eps"),
+            "revenue": data.get("revenue"),
+            "market_cap": int(market_cap) if market_cap else None,
+            "beta": data.get("beta"),
+            "roe": data.get("roe"),
+            "div_yield": data.get("div_yield"),
+            "week_52_high": high_52w,
+            "week_52_low": low_52w,
+            "price_to_book": data.get("price_to_book"),
+            "debt_equity": data.get("debt_equity"),
+            "revenue_growth": data.get("revenue_growth"),
+            "ebitda": data.get("ebitda"),
+            "ceo": data.get("ceo"),
+            "employees": data.get("employees"),
+            "website": data.get("website"),
+            "avg_volume": data.get("avg_volume"),
+            "recommendations": {
+                "strong_buy": rec[0], "buy": rec[1], "hold": rec[2],
+                "sell": rec[3], "strong_sell": rec[4],
+            } if rec else None,
+            "summary": ". ".join(parts) + ".",
+        }
+        return result
+    finally:
+        conn.close()
 
 
-def quote_to_ticker_bar_row(q: dict) -> dict:
-    return {
-        "ticker": q["ticker"],
-        "price": q["price"],
-        "change": q.get("change_percent", 0.0),
-        "direction": q.get("direction", "up"),
-    }
+def _get_ticker_list() -> list[str]:
+    if not snowflake_configured():
+        return []
+    conn = get_snowflake_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT DISTINCT TICKER FROM FUNDAMENTALS ORDER BY TICKER")
+        return [row[0] for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def _search_tickers(query: str, limit: int = 10) -> list[dict]:
+    if not snowflake_configured():
+        return []
+    conn = get_snowflake_connection()
+    try:
+        cur = conn.cursor()
+        q = query.upper()
+        cur.execute(
+            """
+            SELECT TICKER, COMPANY_NAME, SECTOR
+            FROM FUNDAMENTALS
+            WHERE TICKER ILIKE %s OR COMPANY_NAME ILIKE %s
+            ORDER BY
+                CASE WHEN TICKER = %s THEN 0
+                     WHEN TICKER ILIKE %s THEN 1
+                     ELSE 2 END,
+                TICKER
+            LIMIT %s
+            """,
+            (f"{q}%", f"%{query}%", q, f"{q}%", limit),
+        )
+        return [
+            {"symbol": row[0], "description": row[1] or row[0], "sector": row[2]}
+            for row in cur.fetchall()
+        ]
+    finally:
+        conn.close()
 
 
 @router.get("/quote")
 async def get_quote(ticker: str):
-    return get_stock_quote(ticker.upper())
-
-
-@router.get("/tickers")
-async def get_ticker_bar():
-    return [quote_to_ticker_bar_row(get_stock_quote(t)) for t in TICKER_LIST]
-
-
-async def _get_stock_info(ticker: str) -> dict:
-    """Fetch rich stock data from Finnhub: price, P/E, market cap, 52-week range."""
-    key = FINNHUB_KEY
-    if not key:
-        raise HTTPException(status_code=500, detail="FINNHUB_KEY_1 not configured")
-
-    params = {"symbol": ticker, "token": key}
-
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        quote_res, profile_res, metrics_res = await asyncio.gather(
-            client.get(f"{FINNHUB_BASE}/quote", params=params),
-            client.get(f"{FINNHUB_BASE}/stock/profile2", params=params),
-            client.get(f"{FINNHUB_BASE}/stock/metric", params={**params, "metric": "all"}),
-        )
-
-    quote = quote_res.json()
-    profile = profile_res.json()
-    metrics = metrics_res.json().get("metric", {})
-
-    current = float(quote.get("c") or 0)
-    prev = float(quote.get("pc") or 0)
-    change = round(current - prev, 2)
-    change_pct = round(float(quote.get("dp") or 0), 2)
-    name = profile.get("name") or ticker
-    market_cap_m = profile.get("marketCapitalization")  # Finnhub returns millions
-    market_cap = market_cap_m * 1_000_000 if market_cap_m else None
-    pe_ratio = metrics.get("peAnnual") or metrics.get("peTTM")
-    week_52_high = metrics.get("52WeekHigh")
-    week_52_low = metrics.get("52WeekLow")
-
-    result = {
-        "ticker": ticker,
-        "name": name,
-        "price": round(current, 2),
-        "prev_close": round(prev, 2),
-        "change": change,
-        "change_percent": change_pct,
-        "direction": "up" if change >= 0 else "down",
-        "pe_ratio": round(pe_ratio, 2) if pe_ratio else None,
-        "market_cap": int(market_cap) if market_cap else None,
-        "week_52_high": week_52_high,
-        "week_52_low": week_52_low,
-        "volume": int(quote.get("v") or 0),
-        "high": round(float(quote.get("h") or 0), 2),
-        "low": round(float(quote.get("l") or 0), 2),
-        "timestamp": datetime.now().isoformat(),
-    }
-
-    # Voice-friendly summary
-    parts = [f"{name} ({ticker}) is trading at ${current:.2f}"]
-    parts.append(f"{'up' if change >= 0 else 'down'} {abs(change_pct):.2f}% from yesterday's close of ${prev:.2f}")
-    if pe_ratio:
-        parts.append(f"P/E ratio is {pe_ratio:.1f}")
-    if market_cap:
-        parts.append(f"market cap is ${market_cap / 1e9:.1f}B")
-    if week_52_high and week_52_low:
-        parts.append(f"52-week range is ${week_52_low:.2f} to ${week_52_high:.2f}")
-    result["summary"] = ". ".join(parts) + "."
-
+    if not snowflake_configured():
+        raise HTTPException(status_code=503, detail="Snowflake not configured")
+    result = _get_quote_from_snowflake(ticker.upper())
+    if not result:
+        raise HTTPException(status_code=404, detail=f"No price data for {ticker.upper()}")
     return result
-
-
-async def _search_finnhub(q: str, client: httpx.AsyncClient) -> list[dict]:
-    resp = await client.get(f"{FINNHUB_BASE}/search", params={"q": q, "token": FINNHUB_KEY})
-    return resp.json().get("result", []) if resp.status_code == 200 else []
-
-
-def _best_ticker(results: list[dict]) -> str | None:
-    # Prefer US common stock without dots (no ADR/ETF suffixes)
-    for r in results:
-        if r.get("type") == "Common Stock" and "." not in r.get("symbol", ""):
-            return r["symbol"]
-    # Fallback: any result without a dot
-    for r in results:
-        if "." not in r.get("symbol", ""):
-            return r["symbol"]
-    return results[0]["symbol"] if results else None
-
-
-async def _resolve_ticker(query: str) -> str:
-    """Resolve a company name or ticker symbol to a canonical ticker.
-
-    'Apple' -> 'AAPL', 'AAPL' -> 'AAPL', 'Tesla motors' -> 'TSLA'
-    """
-    q = query.strip()
-
-    # Already looks like a ticker — use directly
-    if q.upper() == q and len(q) <= 5 and q.isalpha():
-        return q
-
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        results = await _search_finnhub(q, client)
-
-        # If multi-word query returned nothing, retry with first word only
-        if not results and " " in q:
-            results = await _search_finnhub(q.split()[0], client)
-
-    ticker = _best_ticker(results)
-    if ticker:
-        return ticker
-
-    raise HTTPException(status_code=404, detail=f"No ticker found for '{q}'")
 
 
 @router.get("/stock-info")
 async def get_stock_info(q: str):
-    """Rich stock data: price, P/E, market cap, 52-week range, and voice summary.
+    if not snowflake_configured():
+        raise HTTPException(status_code=503, detail="Snowflake not configured")
+    result = _get_stock_info_from_snowflake(q.upper())
+    if not result:
+        raise HTTPException(status_code=404, detail=f"No data found for {q.upper()}")
+    return result
 
-    Accepts a ticker symbol OR company name:
-      GET /api/v1/market/stock-info?q=AAPL
-      GET /api/v1/market/stock-info?q=Apple
-      GET /api/v1/market/stock-info?q=Tesla motors
-    """
-    ticker = await _resolve_ticker(q)
-    return await _get_stock_info(ticker)
+
+@router.get("/search")
+async def search_tickers(q: str, limit: int = 10):
+    return _search_tickers(q, limit)
+
+
+@router.get("/tickers")
+async def get_ticker_bar():
+    tickers = _get_ticker_list()
+    if not tickers:
+        raise HTTPException(status_code=503, detail="Snowflake not configured")
+    # Return price bar rows for first 50 tickers
+    results = []
+    conn = get_snowflake_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            WITH latest AS (
+                SELECT TICKER, CLOSE_PRICE, TRADE_DATE,
+                       LAG(CLOSE_PRICE) OVER (PARTITION BY TICKER ORDER BY TRADE_DATE) AS prev_close
+                FROM PRICES
+                WHERE TICKER IN (
+                    SELECT TICKER FROM FUNDAMENTALS
+                    WHERE TICKER IN ('AAPL','MSFT','NVDA','AMZN','GOOGL','META','TSLA',
+                                     'JPM','V','MA','WMT','JNJ','UNH','XOM','AVGO',
+                                     'AMD','GS','BAC','COST','MCD','NKE','ABBV','PFE',
+                                     'MRK','CVX','CAT','BA','RTX','INTC','SBUX')
+                )
+            ),
+            ranked AS (
+                SELECT *, ROW_NUMBER() OVER (PARTITION BY TICKER ORDER BY TRADE_DATE DESC) AS rn
+                FROM latest
+            )
+            SELECT TICKER, CLOSE_PRICE, prev_close
+            FROM ranked WHERE rn = 1
+            ORDER BY TICKER
+            """
+        )
+        for row in cur.fetchall():
+            ticker, price, prev = row
+            price = float(price)
+            prev = float(prev) if prev else price
+            change_pct = round(((price - prev) / prev) * 100, 2) if prev else 0.0
+            results.append({
+                "ticker": ticker,
+                "price": round(price, 2),
+                "change": change_pct,
+                "direction": "up" if change_pct >= 0 else "down",
+            })
+    finally:
+        conn.close()
+    return results
 
 
 @router.get("/batch")
 async def get_batch_quotes():
-    results = [get_stock_quote(t) for t in TICKER_LIST]
-    return {
-        "quotes": results,
-        "timestamp": datetime.now().isoformat(),
-        "count": len(results),
-    }
+    tickers = _get_ticker_list()
+    results = []
+    conn = get_snowflake_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            WITH ranked AS (
+                SELECT TICKER, CLOSE_PRICE, OPEN_PRICE, HIGH_PRICE, LOW_PRICE, VOLUME, TRADE_DATE,
+                       ROW_NUMBER() OVER (PARTITION BY TICKER ORDER BY TRADE_DATE DESC) AS rn
+                FROM PRICES
+            )
+            SELECT TICKER, CLOSE_PRICE, TRADE_DATE FROM ranked WHERE rn = 1
+            ORDER BY TICKER
+            LIMIT 100
+            """
+        )
+        for row in cur.fetchall():
+            results.append({
+                "ticker": row[0],
+                "price": round(float(row[1]), 2),
+                "trade_date": str(row[2]),
+                "direction": "up",
+                "change": 0.0,
+            })
+    finally:
+        conn.close()
+    return {"quotes": results, "timestamp": datetime.now().isoformat(), "count": len(results)}

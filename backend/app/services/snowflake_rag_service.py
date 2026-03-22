@@ -133,6 +133,123 @@ def get_news(ticker: str) -> tuple[list[dict[str, Any]], list[str]]:
         conn.close()
 
 
+def get_recommendations(ticker: str) -> dict[str, Any]:
+    """Latest analyst recommendations (strong_buy/buy/hold/sell/strong_sell)."""
+    if not snowflake_configured():
+        return {}
+    conn = get_snowflake_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT STRONG_BUY, BUY, HOLD, SELL, STRONG_SELL, PERIOD
+            FROM RECOMMENDATIONS
+            WHERE TICKER = %s
+            ORDER BY PERIOD DESC
+            LIMIT 1
+            """,
+            (ticker.upper(),),
+        )
+        row = cur.fetchone()
+        if not row:
+            return {}
+        strong_buy, buy, hold, sell, strong_sell, period = row
+        sb, b, h, s, ss = (
+            int(strong_buy or 0), int(buy or 0), int(hold or 0),
+            int(sell or 0), int(strong_sell or 0),
+        )
+        total = sb + b + h + s + ss
+        bullish = sb + b
+        bearish = s + ss
+        if total > 0:
+            if bullish / total >= 0.5:
+                consensus = "BUY"
+            elif bearish / total >= 0.3:
+                consensus = "SELL"
+            else:
+                consensus = "HOLD"
+        else:
+            consensus = "HOLD"
+        return {
+            "strong_buy": sb,
+            "buy": b,
+            "hold": h,
+            "sell": s,
+            "strong_sell": ss,
+            "total": total,
+            "consensus": consensus,
+            "period": str(period) if period else None,
+        }
+    except Exception:
+        return {}
+    finally:
+        conn.close()
+
+
+def get_full_fundamentals(ticker: str) -> dict[str, Any]:
+    """Rich FUNDAMENTALS row including company info, valuation, and financials."""
+    if not snowflake_configured():
+        return {}
+    conn = get_snowflake_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT TICKER, COMPANY_NAME, SECTOR, INDUSTRY, MARKET_CAP,
+                   PE_RATIO, FORWARD_PE, EPS, REVENUE, REVENUE_GROWTH,
+                   GROSS_MARGIN, PROFIT_MARGIN, OPERATING_MARGINS, EBITDA,
+                   DEBT_EQUITY, CURRENT_RATIO, ROE, ROA, FCF,
+                   BETA, HIGH_52W, LOW_52W, DIV_YIELD, PRICE_TO_BOOK
+            FROM FUNDAMENTALS
+            WHERE TICKER = %s
+            """,
+            (ticker.upper(),),
+        )
+        row = cur.fetchone()
+        if not row:
+            return {}
+        cols = [c[0].lower() for c in cur.description]
+        return dict(zip(cols, row))
+    except Exception:
+        return {}
+    finally:
+        conn.close()
+
+
+def get_news_detailed(ticker: str, limit: int = 8) -> list[dict[str, Any]]:
+    """Recent news articles with headline, summary, source, date, and sentiment."""
+    if not snowflake_configured():
+        return []
+    conn = get_snowflake_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT HEADLINE, SUMMARY, SOURCE_NAME, PUBLISHED_AT, SENTIMENT
+            FROM NEWS
+            WHERE TICKER = %s
+            ORDER BY PUBLISHED_AT DESC
+            LIMIT %s
+            """,
+            (ticker.upper(), limit),
+        )
+        rows = cur.fetchall() or []
+        return [
+            {
+                "headline": row[0],
+                "summary": row[1],
+                "source": row[2],
+                "published_at": str(row[3]) if row[3] else None,
+                "sentiment": float(row[4]) if row[4] is not None else None,
+            }
+            for row in rows
+        ]
+    except Exception:
+        return []
+    finally:
+        conn.close()
+
+
 def _row_metrics(row: tuple) -> dict[str, Any]:
     """Map METRICS row to named fields (matches upload_market_data MERGE column order)."""
     return {

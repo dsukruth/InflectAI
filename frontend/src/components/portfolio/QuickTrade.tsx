@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuthStore } from "@/store/authStore";
 import { usePortfolioStore } from "@/store/portfolioStore";
@@ -51,12 +52,14 @@ const QuickTrade = ({ onTradeComplete, quotes: liveQuotes }: Props) => {
     debounceRef.current = setTimeout(async () => {
       setSearching(true);
       try {
-        const res = await fetch(`${API_URL}/api/v1/market/quote?ticker=${query}`);
+        const res = await fetch(`${API_URL}/api/v1/market/search?q=${encodeURIComponent(query)}&limit=8`);
         if (res.ok) {
           const data = await res.json();
-          // Build a single result from the quote endpoint
-          setSearchResults([{ symbol: query.toUpperCase(), description: data.ticker || query.toUpperCase() }]);
-          setShowDropdown(true);
+          setSearchResults(data.map((r: { symbol: string; description: string }) => ({
+            symbol: r.symbol,
+            description: r.description,
+          })));
+          setShowDropdown(data.length > 0);
         } else {
           setSearchResults([]);
           setShowDropdown(false);
@@ -361,7 +364,7 @@ const QuickTrade = ({ onTradeComplete, quotes: liveQuotes }: Props) => {
       </div>
 
       {/* Confirmation Modal */}
-      {showConfirm && (
+      {showConfirm && createPortal(
         <div className="fixed inset-0 flex items-center justify-center z-50" style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(8px)" }}>
           <div className="rounded-2xl p-7 w-[340px]" style={{ background: "#0F1820", border: "1px solid rgba(0,200,255,0.2)" }}>
             <h2 className="font-bold text-lg mb-5" style={{ color: "white" }}>
@@ -415,7 +418,8 @@ const QuickTrade = ({ onTradeComplete, quotes: liveQuotes }: Props) => {
               Paper trading only. Not investment advice.
             </p>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );

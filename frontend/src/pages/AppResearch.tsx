@@ -5,6 +5,7 @@ import { usePortfolioStore } from "@/store/portfolioStore";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { analyzeQuery, transcribeAudio } from "@/api/query";
+import { apiCall } from "@/api/client";
 import { getChartData } from "@/api/chart";
 import { getQuote, getMarketHistory, getMetricCard } from "@/api/market";
 import { executeTrade as executeTradeApi } from "@/api/trades";
@@ -79,7 +80,7 @@ const detectTradeIntent = (text: string) => {
 const AppResearch = () => {
   const { user } = useAuthStore();
   const { ticker: sessionTicker, timeframe: sessionTimeframe, setTicker, addAnswer, sessionId } = useSessionStore();
-  const { buyingPower, setBuyingPower, setTotalValue } = usePortfolioStore();
+  const { buyingPower, setBuyingPower, setTotalValue, updatePosition, removePosition, addTrade } = usePortfolioStore();
   const { showToast } = useInflectToast();
 
   const [messages, setMessages] = useState<ChatMsg[]>([]);
@@ -105,13 +106,22 @@ const AppResearch = () => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  const { setPositions, setTrades } = usePortfolioStore();
+
   useEffect(() => {
-    if (!user) return;
     (async () => {
-      const { data } = await supabase.from("profiles").select("buying_power").eq("id", user.id).single();
-      if (data) { setBuyingPower(data.buying_power); setTotalValue(data.buying_power); }
+      try {
+        const { fetchPortfolio } = await import("@/api/trades");
+        const data = await fetchPortfolio();
+        setPositions(data.positions);
+        setTrades(data.trades);
+        setBuyingPower(data.buying_power);
+        setTotalValue(data.buying_power);
+      } catch (e) {
+        console.error("Portfolio load error:", e);
+      }
     })();
-  }, [user, setBuyingPower, setTotalValue]);
+  }, [setBuyingPower, setTotalValue, setPositions, setTrades]);
 
   // Silence detection
   useEffect(() => {
@@ -262,30 +272,44 @@ const AppResearch = () => {
       setStockQuote(quote);
       setMetricData(md);
 
+      const msgId = crypto.randomUUID();
       const botMsg: ChatMsg = {
-        id: crypto.randomUUID(),
+        id: msgId,
         role: "bot",
         text: result.answer,
         answerData: answerResult,
         stockQuote: quote,
         metricData: md,
         onGenerateThesis: result.ticker ? () => handleGenerateThesis(result.ticker!) : undefined,
-        onPlotTrend: result.ticker ? () => handlePlotTrend(result.ticker!) : undefined,
+        onPlotTrend: result.ticker ? () => handlePlotTrendForMsg(msgId, result.ticker!, md?.metric ?? null) : undefined,
       };
       setMessages(prev => [...prev, botMsg]);
 
       if (result.intent_type === "trade") {
         const trade = detectTradeIntent(trimmed);
-        if (trade?.ticker && trade?.quantity) {
-          const estPrice = quote?.price || 189.5;
-          setPendingOrder({
-            ticker: trade.ticker,
-            side: trade.side,
-            quantity: trade.quantity,
-            order_type: "market",
-            estimated_price: estPrice,
-            estimated_total: estPrice * trade.quantity,
-          });
+        // Use backend-resolved values (handles "Tesla" → "TSLA", company names, etc.)
+        const ticker = result.ticker || trade?.ticker;
+        const quantity = result.quantity || trade?.quantity;
+        const side = (result.side as "buy" | "sell" | undefined) || trade?.side;
+        if (ticker && quantity && side) {
+          let estPrice = quote?.price;
+          // Fetch price if not already loaded (trade intents skip price_check branch)
+          if (!estPrice) {
+            try {
+              const priceRes = await getQuote(ticker);
+              estPrice = priceRes?.price;
+            } catch { /* use fallback */ }
+          }
+          if (estPrice) {
+            setPendingOrder({
+              ticker,
+              side,
+              quantity,
+              order_type: "market",
+              estimated_price: estPrice,
+              estimated_total: estPrice * quantity,
+            });
+          }
         }
       }
 
@@ -336,25 +360,33 @@ const AppResearch = () => {
     setThesisLoading(true);
     try {
       if (USE_BACKEND) {
-        const { apiCall } = await import("@/api/client");
         const result = await apiCall<ThesisResult>("/api/v1/thesis/generate", { method: "POST", body: JSON.stringify({ ticker: t }) });
         if (result) setThesisData(result);
       } else {
         await new Promise(r => setTimeout(r, 1500));
         setThesisData(mockThesis(t));
       }
-    } catch { toast({ title: "Error", description: "Couldn't generate thesis", variant: "destructive" }); }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Couldn't generate thesis";
+      toast({ title: "Error", description: msg, variant: "destructive" });
+    }
     finally { setThesisLoading(false); }
   }, [answerData]);
 
-  const handlePlotTrend = useCallback(async (ticker?: string) => {
-    const t = ticker || answerData?.ticker;
-    if (!t) return;
+  const handlePlotTrendForMsg = useCallback(async (msgId: string, ticker: string, metric: string | null) => {
+    // Mark message as loading
+    setMessages(prev => prev.map(m => m.id === msgId ? { ...m, trendChartLoading: true } : m));
     try {
-      const data = await getChartData(t, metricData?.metric || null, null);
+      const data = await getChartData(ticker, metric, null);
+      setMessages(prev => prev.map(m =>
+        m.id === msgId ? { ...m, trendChart: data, trendChartLoading: false } : m
+      ));
       if (data) setChartData(data);
-    } catch { toast({ title: "Error", description: "Couldn't load chart data", variant: "destructive" }); }
-  }, [answerData, metricData]);
+    } catch {
+      setMessages(prev => prev.map(m => m.id === msgId ? { ...m, trendChartLoading: false } : m));
+      toast({ title: "Error", description: "Couldn't load chart data", variant: "destructive" });
+    }
+  }, []);
 
   const handleTextSubmit = useCallback((text: string) => {
     if (!text.trim()) return;
@@ -362,20 +394,33 @@ const AppResearch = () => {
   }, [submitQuery]);
 
   const handleTradeConfirm = useCallback(async () => {
-    if (!pendingOrder || !user) return;
+    if (!pendingOrder) return;
     if (fillResult) { setPendingOrder(null); setFillResult(null); setTradeLoading(false); return; }
     setTradeLoading(true);
     try {
-      let fill: { fill_price: number; total_value: number };
-      if (USE_BACKEND) { fill = await executeTradeApi({ ticker: pendingOrder.ticker, side: pendingOrder.side, quantity: pendingOrder.quantity, order_type: "market" }); }
-      else { await new Promise(r => setTimeout(r, 1500)); const fp = pendingOrder.estimated_price * (1 + (Math.random() - 0.5) * 0.001); fill = { fill_price: fp, total_value: fp * pendingOrder.quantity }; }
-      const newBP = pendingOrder.side === "buy" ? buyingPower - fill.total_value : buyingPower + fill.total_value;
-      setBuyingPower(newBP);
-      await supabase.from("trades").insert({ user_id: user.id, ticker: pendingOrder.ticker, side: pendingOrder.side, quantity: pendingOrder.quantity, fill_price: fill.fill_price, total_value: fill.total_value, status: "filled" });
-      await supabase.from("profiles").update({ buying_power: newBP }).eq("id", user.id);
+      const fill = await executeTradeApi({
+        ticker: pendingOrder.ticker,
+        side: pendingOrder.side,
+        quantity: pendingOrder.quantity,
+        order_type: "market",
+      });
+
+      // Backend already persisted the trade + position + buying_power in SQLite.
+      // Refresh the store from backend so everything is in sync.
+      const { fetchPortfolio } = await import("@/api/trades");
+      const portfolio = await fetchPortfolio();
+      setPositions(portfolio.positions);
+      setTrades(portfolio.trades);
+      setBuyingPower(portfolio.buying_power);
+
+      setTradeLoading(false);
       setFillResult({ fill_price: fill.fill_price });
-    } catch { setPendingOrder(null); setTradeLoading(false); toast({ title: "Error", description: "Order failed.", variant: "destructive" }); }
-  }, [pendingOrder, user, fillResult, buyingPower, setBuyingPower]);
+    } catch (err) {
+      setPendingOrder(null);
+      setTradeLoading(false);
+      toast({ title: "Order failed", description: err instanceof Error ? err.message : "Something went wrong", variant: "destructive" });
+    }
+  }, [pendingOrder, fillResult, setBuyingPower, setPositions, setTrades]);
 
   const handleTradeCancel = useCallback(() => { setPendingOrder(null); setTradeLoading(false); setFillResult(null); }, []);
 
@@ -466,7 +511,7 @@ const AppResearch = () => {
           chartTitle={metricData?.metric || "Price"}
           chartTicker={answerData?.ticker || sessionTicker || ""}
           onGenerateThesis={() => handleGenerateThesis()}
-          onPlotTrend={() => handlePlotTrend()}
+          onPlotTrend={() => answerData?.ticker && handlePlotTrendForMsg(`panel-${Date.now()}`, answerData.ticker, metricData?.metric ?? null)}
         />
       </div>
 

@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Chart data — delegates to chart agent."""
 
 from fastapi import APIRouter, Query

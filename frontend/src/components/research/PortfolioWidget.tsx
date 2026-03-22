@@ -1,90 +1,130 @@
 import { usePortfolioStore } from "@/store/portfolioStore";
 import { useTicker } from "@/hooks/useTicker";
-import { LineChart, Line, ResponsiveContainer } from "recharts";
-
-const LOGO_TOKEN = "pk_AH1Nlal1QY6dlBilaz85Bg";
-
-const TICKER_TO_DOMAIN: Record<string, string> = {
-  AAPL: "apple.com", MSFT: "microsoft.com", NVDA: "nvidia.com", AMZN: "amazon.com",
-  GOOGL: "google.com", META: "meta.com", TSLA: "tesla.com", JPM: "jpmorgan.com",
-  V: "visa.com", UNH: "unitedhealthgroup.com",
-};
-
-const generateSparkline = (dir: "up" | "down") =>
-  Array.from({ length: 12 }, (_, i) => ({
-    v: 100 + (dir === "up" ? 1 : -1) * Math.sin(i * 0.6) * 2 + (dir === "up" ? i * 0.3 : -i * 0.3) + Math.random(),
-  }));
+import { formatCurrency } from "@/utils/formatters";
 
 const PortfolioWidget = () => {
-  const { totalValue, buyingPower } = usePortfolioStore();
+  const { positions, buyingPower, trades } = usePortfolioStore();
   const { quotes } = useTicker();
-  const topStocks = quotes.slice(0, 3);
+
+  // Build a quote lookup from the ticker bar
+  const quoteMap = Object.fromEntries(quotes.map((q) => [q.ticker, q]));
+
+  const positionsWithPnl = positions.map((p) => {
+    const q = quoteMap[p.ticker];
+    const currentPrice = q?.price ?? p.avg_cost_basis;
+    const pnl = (currentPrice - p.avg_cost_basis) * p.quantity;
+    const pnlPct = ((currentPrice - p.avg_cost_basis) / p.avg_cost_basis) * 100;
+    const marketValue = currentPrice * p.quantity;
+    return { ...p, currentPrice, pnl, pnlPct, marketValue };
+  });
+
+  const totalMarketValue = positionsWithPnl.reduce((s, p) => s + p.marketValue, 0);
+  const totalPnl = positionsWithPnl.reduce((s, p) => s + p.pnl, 0);
+  const recentTrades = trades.slice(0, 3);
 
   return (
     <div className="glass-panel glass-edge-gold overflow-hidden">
+      {/* Header */}
       <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
         <h3 className="font-mono" style={{ color: "hsl(var(--muted-foreground))", fontSize: 10, letterSpacing: "0.15em" }}>
-          PORTFOLIO PERFORMANCE
+          MY PORTFOLIO
         </h3>
-        <button className="font-mono" style={{ color: "hsl(var(--muted-foreground))", fontSize: 10, background: "none", border: "none", cursor: "pointer" }}>
-          •••
-        </button>
+        <span className="font-mono" style={{ color: "hsl(var(--muted-foreground))", fontSize: 10 }}>
+          {positions.length} position{positions.length !== 1 ? "s" : ""}
+        </span>
       </div>
 
-      {/* Table header */}
-      <div className="grid grid-cols-4 px-4 py-2" style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-        {["Name", "Portfolio", "Price", "Chg %"].map((h) => (
-          <span key={h} className="font-mono" style={{ color: "hsl(var(--muted-foreground))", fontSize: 9, letterSpacing: "0.1em" }}>
-            {h}
-          </span>
-        ))}
+      {/* Summary row */}
+      <div className="grid grid-cols-3 px-4 py-3" style={{ borderBottom: "1px solid rgba(255,255,255,0.04)", gap: 8 }}>
+        <div>
+          <p className="font-mono" style={{ color: "hsl(var(--muted-foreground))", fontSize: 9, letterSpacing: "0.1em", marginBottom: 2 }}>CASH</p>
+          <p className="font-mono" style={{ color: "hsl(var(--cyan))", fontSize: 12, fontWeight: 700 }}>{formatCurrency(buyingPower)}</p>
+        </div>
+        <div>
+          <p className="font-mono" style={{ color: "hsl(var(--muted-foreground))", fontSize: 9, letterSpacing: "0.1em", marginBottom: 2 }}>POSITIONS</p>
+          <p className="font-mono" style={{ color: "hsl(var(--foreground))", fontSize: 12, fontWeight: 700 }}>{formatCurrency(totalMarketValue)}</p>
+        </div>
+        <div>
+          <p className="font-mono" style={{ color: "hsl(var(--muted-foreground))", fontSize: 9, letterSpacing: "0.1em", marginBottom: 2 }}>UNREAL P&L</p>
+          <p className="font-mono" style={{ color: totalPnl >= 0 ? "hsl(var(--bull))" : "hsl(var(--bear))", fontSize: 12, fontWeight: 700 }}>
+            {totalPnl >= 0 ? "+" : ""}{formatCurrency(totalPnl)}
+          </p>
+        </div>
       </div>
 
-      {/* Rows */}
-      <div className="px-2">
-        {topStocks.map((q) => {
-          const isUp = q.direction === "up";
-          const color = isUp ? "hsl(var(--bull))" : "hsl(var(--bear))";
-          const domain = TICKER_TO_DOMAIN[q.ticker];
-          return (
-            <div key={q.ticker} className="grid grid-cols-4 items-center px-2 py-2.5" style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
-              <div className="flex items-center gap-2">
-                {domain ? (
-                  <img
-                    src={`https://img.logo.dev/${domain}?token=${LOGO_TOKEN}&size=24`}
-                    alt={q.ticker}
-                    loading="lazy"
-                    className="w-6 h-6 rounded-full"
-                  />
-                ) : (
-                  <div
-                    className="shrink-0 flex items-center justify-center"
-                    style={{ width: 24, height: 24, borderRadius: "50%", background: "hsl(var(--muted))", fontSize: 8, color: "hsl(var(--foreground))", fontWeight: 700 }}
-                  >
-                    {q.ticker[0]}
-                  </div>
-                )}
+      {/* Position rows */}
+      {positionsWithPnl.length > 0 ? (
+        <div>
+          <div className="grid px-4 py-1" style={{ gridTemplateColumns: "1fr auto auto", gap: 8, borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+            {["TICKER", "SHARES · PRICE", "P&L"].map((h) => (
+              <span key={h} className="font-mono" style={{ color: "hsl(var(--muted-foreground))", fontSize: 9, letterSpacing: "0.08em" }}>{h}</span>
+            ))}
+          </div>
+          {positionsWithPnl.map((p) => {
+            const isUp = p.pnl >= 0;
+            const color = isUp ? "hsl(var(--bull))" : "hsl(var(--bear))";
+            return (
+              <div
+                key={p.id}
+                className="grid px-4 py-2.5 items-center"
+                style={{ gridTemplateColumns: "1fr auto auto", gap: 8, borderBottom: "1px solid rgba(255,255,255,0.03)" }}
+              >
                 <div>
-                  <p style={{ color: "hsl(var(--foreground))", fontSize: 11, fontWeight: 600 }}>{q.ticker}</p>
+                  <p className="font-mono" style={{ color: "hsl(var(--gold))", fontSize: 12, fontWeight: 700 }}>{p.ticker}</p>
+                  <p className="font-mono" style={{ color: "hsl(var(--muted-foreground))", fontSize: 10 }}>avg {formatCurrency(p.avg_cost_basis)}</p>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <p className="font-mono" style={{ color: "hsl(var(--foreground))", fontSize: 11 }}>{p.quantity} @ {formatCurrency(p.currentPrice)}</p>
+                  <p className="font-mono" style={{ color: "hsl(var(--muted-foreground))", fontSize: 10 }}>{formatCurrency(p.marketValue)}</p>
+                </div>
+                <div style={{ textAlign: "right", minWidth: 60 }}>
+                  <p className="font-mono" style={{ color, fontSize: 11, fontWeight: 600 }}>
+                    {isUp ? "+" : ""}{formatCurrency(p.pnl)}
+                  </p>
+                  <p className="font-mono" style={{ color, fontSize: 10 }}>
+                    {isUp ? "▲" : "▼"} {Math.abs(p.pnlPct).toFixed(2)}%
+                  </p>
                 </div>
               </div>
-              <div style={{ width: 48, height: 20 }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={generateSparkline(q.direction)}>
-                    <Line type="monotone" dataKey="v" stroke={isUp ? "#00FF88" : "#E05555"} strokeWidth={1} dot={false} />
-                  </LineChart>
-                </ResponsiveContainer>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="px-4 py-4 text-center">
+          <p style={{ color: "hsl(var(--muted-foreground))", fontSize: 11 }}>No positions yet.</p>
+          <p style={{ color: "hsl(var(--muted-foreground))", fontSize: 10, marginTop: 2 }}>Execute a trade to see positions here.</p>
+        </div>
+      )}
+
+      {/* Recent trades */}
+      {recentTrades.length > 0 && (
+        <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+          <p className="font-mono px-4 pt-3 pb-1" style={{ color: "hsl(var(--muted-foreground))", fontSize: 9, letterSpacing: "0.1em" }}>RECENT TRADES</p>
+          {recentTrades.map((t) => (
+            <div key={t.id} className="flex items-center justify-between px-4 py-2" style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
+              <div className="flex items-center gap-2">
+                <span
+                  className="font-mono"
+                  style={{
+                    fontSize: 9,
+                    padding: "2px 6px",
+                    borderRadius: 4,
+                    background: t.side === "buy" ? "rgba(0,214,143,0.15)" : "rgba(224,85,85,0.15)",
+                    color: t.side === "buy" ? "hsl(var(--bull))" : "hsl(var(--bear))",
+                    fontWeight: 700,
+                    textTransform: "uppercase",
+                  }}
+                >
+                  {t.side}
+                </span>
+                <span className="font-mono" style={{ color: "hsl(var(--gold))", fontSize: 11, fontWeight: 700 }}>{t.ticker}</span>
+                <span style={{ color: "hsl(var(--muted-foreground))", fontSize: 10 }}>{t.quantity} shares</span>
               </div>
-              <span className="font-mono" style={{ color: "hsl(var(--foreground))", fontSize: 11 }}>
-                ${q.price.toFixed(2)}
-              </span>
-              <span className="font-mono" style={{ color: isUp ? "#00FF88" : "#E05555", fontSize: 11 }}>
-                {isUp ? "+" : ""}{q.change.toFixed(2)}%
-              </span>
+              <span className="font-mono" style={{ color: "hsl(var(--foreground))", fontSize: 11 }}>{formatCurrency(t.fill_price)}</span>
             </div>
-          );
-        })}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 };

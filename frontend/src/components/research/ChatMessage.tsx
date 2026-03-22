@@ -1,9 +1,11 @@
 import type { AnswerResult, StockQuote, ThesisResult, ResearchMetricData } from "@/types/api";
+import type { ChartData } from "@/api/chart";
 import StockCard from "@/components/charts/StockCard";
 import MetricCard from "@/components/charts/MetricCard";
 import CitationCard from "./CitationCard";
 import ThesisCard from "./ThesisCard";
 import RSIGauge from "@/components/charts/RSIGauge";
+import InlineTrendChart from "@/components/charts/InlineTrendChart";
 
 export interface ChatMsg {
   id: string;
@@ -14,6 +16,8 @@ export interface ChatMsg {
   metricData?: ResearchMetricData | null;
   thesisData?: ThesisResult | null;
   thesisLoading?: boolean;
+  trendChart?: ChartData | null;
+  trendChartLoading?: boolean;
   onGenerateThesis?: () => void;
   onPlotTrend?: () => void;
 }
@@ -111,9 +115,10 @@ const ChatMessage = ({ msg }: { msg: ChatMsg }) => {
                 Generate thesis ↗
               </button>
             )}
-            {msg.answerData.ticker && msg.onPlotTrend && (
+            {msg.answerData.ticker && msg.onPlotTrend && !msg.trendChart && (
               <button
                 onClick={msg.onPlotTrend}
+                disabled={msg.trendChartLoading}
                 className="font-mono transition-colors"
                 style={{
                   fontSize: 11,
@@ -121,14 +126,24 @@ const ChatMessage = ({ msg }: { msg: ChatMsg }) => {
                   borderRadius: 10,
                   border: "1px solid rgba(255,255,255,0.1)",
                   background: "transparent",
-                  color: "hsl(var(--muted-foreground))",
-                  cursor: "pointer",
+                  color: msg.trendChartLoading ? "hsl(var(--cyan))" : "hsl(var(--muted-foreground))",
+                  cursor: msg.trendChartLoading ? "default" : "pointer",
+                  opacity: msg.trendChartLoading ? 0.7 : 1,
                 }}
               >
-                Plot trend ↗
+                {msg.trendChartLoading ? "Loading…" : "Plot trend ↗"}
               </button>
             )}
           </div>
+        )}
+
+        {/* Inline trend chart */}
+        {!isUser && msg.trendChart && msg.answerData?.ticker && (
+          <InlineTrendChart
+            data={msg.trendChart}
+            ticker={msg.answerData.ticker}
+            title={msg.metricData?.metric}
+          />
         )}
 
         {!isUser && (msg.thesisLoading || msg.thesisData) && (

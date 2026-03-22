@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Debug RAG search — uses retrieval agent."""
 
 from fastapi import APIRouter

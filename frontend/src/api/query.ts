@@ -11,6 +11,10 @@ export interface AnalyzeResult {
   source: string;
   citation: string | null;
   confidence_level: "HIGH" | "MEDIUM" | "LOW";
+  /** Trade intent: buy or sell side resolved by the backend LLM. */
+  side?: "buy" | "sell" | null;
+  /** Trade intent: share quantity resolved by the backend LLM. */
+  quantity?: number | null;
   /** Research path: pipeline validation warnings. */
   validation?: { ok: boolean; warnings: string[] };
 }

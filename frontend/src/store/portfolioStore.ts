@@ -12,6 +12,7 @@ interface PortfolioState {
   setTotalValue: (totalValue: number) => void;
   addTrade: (trade: Trade) => void;
   updatePosition: (position: Position) => void;
+  removePosition: (ticker: string) => void;
 }
 
 export const usePortfolioStore = create<PortfolioState>((set) => ({
@@ -30,4 +31,6 @@ export const usePortfolioStore = create<PortfolioState>((set) => ({
         ? s.positions.map((p) => (p.id === position.id ? position : p))
         : [...s.positions, position],
     })),
+  removePosition: (ticker) =>
+    set((s) => ({ positions: s.positions.filter((p) => p.ticker !== ticker) })),
 }));
