@@ -1,0 +1,205 @@
+/* ── Ticker Bar — Bloomberg-style Dense ── */
+.ticker-wrapper {
+  position: fixed;
+  top: 56px;
+  left: 0;
+  right: 0;
+  height: 36px;
+  z-index: 40;
+  overflow: hidden;
+  background: rgba(6, 10, 18, 0.95);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+/* Shimmer line */
+.ticker-shimmer {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(0, 212, 255, 0.3) 20%,
+    rgba(240, 165, 0, 0.5) 50%,
+    rgba(0, 212, 255, 0.3) 80%,
+    transparent 100%
+  );
+  pointer-events: none;
+}
+
+/* Scrolling inner */
+.ticker-inner {
+  display: flex;
+  width: max-content;
+  animation: tickerScroll 90s linear infinite;
+}
+
+.ticker-wrapper:hover .ticker-inner {
+  animation-play-state: paused;
+}
+
+@keyframes tickerScroll {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+/* Individual item */
+.ticker-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 16px;
+  height: 36px;
+  cursor: pointer;
+  transition: background 0.2s ease;
+  position: relative;
+}
+
+.ticker-item:hover {
+  background: linear-gradient(90deg, transparent, rgba(0, 212, 255, 0.04), transparent);
+}
+
+.ticker-item:hover .ticker-symbol {
+  color: hsl(195, 100%, 50%);
+}
+
+.ticker-item:hover .ticker-price {
+  color: #FFFFFF;
+}
+
+/* Separator */
+.ticker-sep {
+  width: 1px;
+  height: 14px;
+  align-self: center;
+  background: linear-gradient(to bottom, transparent, rgba(255, 255, 255, 0.06), transparent);
+  flex-shrink: 0;
+}
+
+/* Symbol */
+.ticker-symbol {
+  color: rgba(255, 255, 255, 0.35);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  transition: color 0.2s;
+}
+
+/* Price */
+.ticker-price {
+  color: rgba(255, 255, 255, 0.7);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  transition: color 0.2s;
+}
+
+/* Flash */
+.ticker-flash {
+  animation: priceFlash 0.4s ease;
+}
+
+@keyframes priceFlash {
+  0% { opacity: 1; }
+  30% { opacity: 0.3; }
+  100% { opacity: 1; }
+}
+
+/* Change pill */
+.ticker-pill {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+.ticker-pill[data-direction="up"] {
+  color: #00FF88;
+  background: rgba(0, 255, 136, 0.08);
+  border: 1px solid rgba(0, 255, 136, 0.15);
+}
+
+.ticker-pill[data-direction="down"] {
+  color: #E05555;
+  background: rgba(224, 85, 85, 0.08);
+  border: 1px solid rgba(224, 85, 85, 0.15);
+}
+
+/* Fade edges */
+.ticker-fade-left {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 60px;
+  height: 100%;
+  background: linear-gradient(to right, rgba(6, 10, 18, 0.95) 0%, transparent 100%);
+  z-index: 3;
+  pointer-events: none;
+}
+
+.ticker-fade-right {
+  position: absolute;
+  right: 80px;
+  top: 0;
+  width: 60px;
+  height: 100%;
+  background: linear-gradient(to left, rgba(6, 10, 18, 0.95) 0%, transparent 100%);
+  z-index: 3;
+  pointer-events: none;
+}
+
+/* Market status */
+.ticker-status {
+  position: absolute;
+  right: 0;
+  top: 0;
+  height: 36px;
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: linear-gradient(to left, rgba(6, 10, 18, 0.98) 60%, transparent 100%);
+  width: 90px;
+  justify-content: flex-end;
+  z-index: 4;
+}
+
+.ticker-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.ticker-dot-live {
+  animation: livePulse 2s infinite;
+}
+
+.ticker-dot-amber {
+  animation: amberPulse 2s infinite;
+}
+
+@keyframes livePulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(0, 255, 136, 0.6); }
+  50% { box-shadow: 0 0 0 4px rgba(0, 255, 136, 0); }
+}
+
+@keyframes amberPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(240, 165, 0, 0.6); }
+  50% { box-shadow: 0 0 0 4px rgba(240, 165, 0, 0); }
+}
+
+.ticker-status-text {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+}

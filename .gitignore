@@ -27,9 +27,6 @@ htmlcov/
 venv/
 env/
 
-# Frontend app (e.g. separate Lovable repo — not tracked in this root)
-frontend/
-
 # Node / frontend
 node_modules/
 dist/

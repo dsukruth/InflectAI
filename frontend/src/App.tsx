@@ -14,6 +14,7 @@ import Login from "./pages/Login.tsx";
 import Register from "./pages/Register.tsx";
 import AppResearch from "./pages/AppResearch.tsx";
 import AppPortfolio from "./pages/AppPortfolio.tsx";
+import AppHome from "./pages/AppHome.tsx";
 import Demo from "./pages/Demo.tsx";
 import NotFound from "./pages/NotFound.tsx";
 
@@ -33,6 +34,16 @@ const AnimatedRoutes = () => {
         <Route path="/login" element={<PageTransition><Login /></PageTransition>} />
         <Route path="/register" element={<PageTransition><Register /></PageTransition>} />
         <Route path="/demo" element={<PageTransition><Demo /></PageTransition>} />
+        <Route
+          path="/app/home"
+          element={
+            <ProtectedRoute>
+              <AppLayout>
+                <PageTransition><AppHome /></PageTransition>
+              </AppLayout>
+            </ProtectedRoute>
+          }
+        />
         <Route
           path="/app/research"
           element={

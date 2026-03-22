@@ -15,10 +15,13 @@ const sourceBadges: Record<string, { emoji: string; label: string; color: string
   WOLFRAM: { emoji: "⚡", label: "Wolfram|Alpha", color: "#F0A500", bg: "rgba(240,165,0,0.08)", border: "rgba(240,165,0,0.3)" },
   MARKET_DATA: { emoji: "📊", label: "Market Data", color: "#00C8FF", bg: "rgba(0,200,255,0.08)", border: "rgba(0,200,255,0.3)" },
   LLM: { emoji: "🤖", label: "AI Generated", color: "#8892A4", bg: "rgba(136,146,164,0.08)", border: "rgba(136,146,164,0.3)" },
+  SNOWFLAKE: { emoji: "❄️", label: "Snowflake", color: "#29B5E8", bg: "rgba(41,181,232,0.08)", border: "rgba(41,181,232,0.3)" },
+  YFINANCE: { emoji: "📈", label: "Yahoo Finance", color: "#7B61FF", bg: "rgba(123,97,255,0.08)", border: "rgba(123,97,255,0.3)" },
+  UNAVAILABLE: { emoji: "—", label: "No data", color: "#8892A4", bg: "rgba(136,146,164,0.06)", border: "rgba(136,146,164,0.2)" },
 };
 
 const MetricCard = ({ metric, value, period, change, changeDirection, source, citation }: MetricCardProps) => {
-  const badge = sourceBadges[source];
+  const badge = sourceBadges[source] ?? sourceBadges.LLM;
   const isUp = changeDirection === "up";
 
   return (

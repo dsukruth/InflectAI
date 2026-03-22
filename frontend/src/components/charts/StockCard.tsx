@@ -46,7 +46,8 @@ const StockCard = ({ quote, isLoading }: StockCardProps) => {
 
   const isUp = quote.direction === "up";
   const color = isUp ? "#00D68F" : "#E05555";
-  const sparkData = generateSparkline(quote.direction);
+  const sparkData =
+    quote.sparkline && quote.sparkline.length > 0 ? quote.sparkline : generateSparkline(quote.direction);
   const open = isMarketOpen();
 
   return (

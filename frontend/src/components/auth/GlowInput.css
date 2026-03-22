@@ -1,0 +1,167 @@
+@property --glow-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+
+@keyframes rotateGlowRing {
+  from { --glow-angle: 0deg; }
+  to { --glow-angle: 360deg; }
+}
+
+@keyframes inputGlowPulse {
+  0%, 100% {
+    box-shadow:
+      0 0 0 1px rgba(0,212,255,0.3),
+      0 0 12px rgba(0,212,255,0.15);
+  }
+  50% {
+    box-shadow:
+      0 0 0 2px rgba(0,212,255,0.5),
+      0 0 24px rgba(0,212,255,0.25),
+      0 0 48px rgba(0,212,255,0.1);
+  }
+}
+
+@keyframes shakeInput {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-4px); }
+  40% { transform: translateX(4px); }
+  60% { transform: translateX(-4px); }
+  80% { transform: translateX(4px); }
+}
+
+.glow-input-wrapper {
+  position: relative;
+  border-radius: 10px;
+}
+
+.glow-ring {
+  position: absolute;
+  inset: -3px;
+  border-radius: 13px;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0;
+  background: conic-gradient(
+    from var(--glow-angle, 0deg),
+    transparent 20%,
+    rgba(0,212,255,0.5) 35%,
+    rgba(240,165,0,0.6) 50%,
+    rgba(0,212,255,0.5) 65%,
+    transparent 80%
+  );
+  transition: opacity 0.3s ease;
+}
+
+.glow-ring-mask {
+  position: absolute;
+  inset: -1px;
+  background: rgba(8,12,20,0.95);
+  border-radius: 11px;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.glow-input-wrapper[data-focused="true"] .glow-ring {
+  opacity: 1;
+  animation: rotateGlowRing 3s linear infinite;
+}
+
+.glow-input {
+  width: 100%;
+  background: rgba(8,12,20,0.6);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  padding: 13px 16px;
+  color: white;
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+  transition: all 0.3s ease;
+  position: relative;
+  z-index: 2;
+}
+
+.glow-input::placeholder {
+  color: rgba(255,255,255,0.2);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+}
+
+/* Hover (not focused) */
+.glow-input-wrapper:not([data-focused="true"]) .glow-input:hover {
+  border-color: rgba(0,212,255,0.2);
+  box-shadow: 0 0 8px rgba(0,212,255,0.06);
+}
+
+/* Focus */
+.glow-input-wrapper[data-focused="true"] .glow-input {
+  border-color: rgba(0,212,255,0.4);
+  box-shadow:
+    0 0 0 1px rgba(0,212,255,0.15),
+    0 0 0 4px rgba(0,212,255,0.06),
+    0 0 20px rgba(0,212,255,0.08),
+    0 0 40px rgba(240,165,0,0.03);
+}
+
+/* Valid state */
+.glow-input-wrapper[data-valid="true"] .glow-input {
+  border-color: rgba(0,255,136,0.3);
+  box-shadow:
+    0 0 0 1px rgba(0,255,136,0.1),
+    0 0 12px rgba(0,255,136,0.06);
+}
+
+.glow-input-wrapper[data-valid="true"] .glow-ring {
+  background: conic-gradient(
+    from var(--glow-angle, 0deg),
+    transparent 20%,
+    rgba(0,255,136,0.4) 40%,
+    rgba(0,255,136,0.6) 50%,
+    rgba(0,255,136,0.4) 60%,
+    transparent 80%
+  );
+}
+
+/* Error state */
+.glow-input-wrapper[data-error="true"] .glow-input {
+  border-color: rgba(224,85,85,0.4);
+  box-shadow:
+    0 0 0 1px rgba(224,85,85,0.15),
+    0 0 12px rgba(224,85,85,0.08);
+  animation: shakeInput 0.4s ease;
+}
+
+.glow-input-wrapper[data-error="true"] .glow-ring {
+  background: conic-gradient(
+    from var(--glow-angle, 0deg),
+    transparent 20%,
+    rgba(224,85,85,0.4) 40%,
+    rgba(224,85,85,0.6) 50%,
+    rgba(224,85,85,0.4) 60%,
+    transparent 80%
+  );
+}
+
+/* Fallback for browsers without @property support */
+@supports not (background: conic-gradient(from 0deg, red, blue)) {
+  .glow-input-wrapper[data-focused="true"] .glow-input {
+    animation: inputGlowPulse 2s ease-in-out infinite;
+  }
+  .glow-ring { display: none; }
+}
+
+/* Button glow */
+.glow-button {
+  position: relative;
+  transition: all 0.2s ease !important;
+}
+
+.glow-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow:
+    0 0 20px rgba(240,165,0,0.3),
+    0 0 60px rgba(0,212,255,0.1),
+    0 8px 24px rgba(0,0,0,0.3) !important;
+}

@@ -57,6 +57,17 @@ export interface StockQuote {
   volume: number;
   direction: 'up' | 'down';
   timestamp: string;
+  sparkline?: { v: number }[];
+}
+
+export interface ResearchMetricData {
+  metric: string;
+  value: string;
+  period: string;
+  change?: string;
+  changeDirection?: 'up' | 'down';
+  source?: string;
+  citation?: string | null;
 }
 
 export interface ThesisResult {
