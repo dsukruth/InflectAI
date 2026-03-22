@@ -6,6 +6,9 @@ import os
 
 router = APIRouter()
 
+_KEY = lambda: os.getenv("ELEVENLABS_API_KEY")
+_VOICE_ID = lambda: os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
+
 
 class TtsRequest(BaseModel):
     text: str
@@ -13,8 +16,8 @@ class TtsRequest(BaseModel):
 
 @router.post("/synthesize")
 async def synthesize(req: TtsRequest):
-    key = os.getenv("ELEVENLABS_API_KEY")
-    voice_id = os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
+    key = _KEY()
+    voice_id = _VOICE_ID()
     if not key or not req.text.strip():
         return Response(status_code=503, content=b"")
 
@@ -46,3 +49,16 @@ async def synthesize(req: TtsRequest):
             )
     except Exception as e:
         return Response(status_code=500, content=str(e).encode(), media_type="text/plain")
+
+
+@router.get("/voices")
+async def list_voices():
+    key = _KEY()
+    if not key:
+        return Response(status_code=503, content=b"ELEVENLABS_API_KEY not set")
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        r = await client.get(
+            "https://api.elevenlabs.io/v1/voices",
+            headers={"xi-api-key": key},
+        )
+        return r.json()
