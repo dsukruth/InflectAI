@@ -6,13 +6,16 @@ DB file: backend/data/inflect_trades.db (auto-created on first use).
 
 from __future__ import annotations
 
+import os
 import sqlite3
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-_DB_PATH = Path(__file__).resolve().parents[3] / "data" / "inflect_trades.db"
+# Use DB_PATH env var if set (production), otherwise /tmp (Docker/Railway), else local dev path
+_default = Path("/tmp/inflect_trades.db")
+_DB_PATH = Path(os.getenv("DB_PATH", str(_default)))
 
 
 def _conn() -> sqlite3.Connection:
